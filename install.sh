@@ -7,13 +7,37 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. Install dependencies
-echo "📦 Installing dependencies (ydotool)..."
-apt-get update && apt-get install -y ydotool
+# --- STEP 1: SMART YDOTOOL DETECTION ---
+YDO_BIN=""
 
-# 2. Setup systemd service for ydotoold (background daemon)
-# We use the config that allows non-root users to access the socket!
-echo "⚙️  Configuring ydotoold service..."
+# Check for manually compiled version (High Priority)
+# Matches our "Build from Source" guide in LLM.md
+if [ -f "/usr/local/bin/ydotoold" ]; then
+    echo "💎 Found manually compiled version at /usr/local/bin/ydotoold"
+    YDO_BIN="/usr/local/bin/ydotoold"
+
+# Check for existing system package
+elif [ -f "/usr/bin/ydotoold" ]; then
+    echo "📦 Found system package version at /usr/bin/ydotoold"
+    YDO_BIN="/usr/bin/ydotoold"
+
+else
+    # Fallback: Install via APT for lazy users
+    echo "⚠️  ydotoold not found. Attempting install via APT..."
+    apt-get update && apt-get install -y ydotool
+    YDO_BIN="/usr/bin/ydotoold"
+fi
+
+# Final Validation
+if [ ! -f "$YDO_BIN" ]; then
+    echo "❌ CRITICAL ERROR: Could not find or install ydotool."
+    echo "👉 Please compile manually following instructions in LLM.md"
+    exit 1
+fi
+
+# --- STEP 2: SERVICE CONFIGURATION ---
+echo "⚙️  Configuring systemd service using: $YDO_BIN"
+
 cat <<EOF > /etc/systemd/system/ydotoold.service
 [Unit]
 Description=ydotool daemon (Jiggler backend)
@@ -25,26 +49,24 @@ Type=simple
 Restart=always
 RestartSec=3
 
-# Command: Ensure we use the specific socket path needed by the script
-ExecStart=/usr/bin/ydotoold --socket-path=/tmp/.ydotool_socket --background
+# Using the detected binary path variable
+ExecStart=$YDO_BIN --socket-path=/tmp/.ydotool_socket --background
 
-# Permissions Fix:
-# Wait 1s for the socket to be created, then give everyone write access.
-# This allows the jiggler script (running as user) to talk to the daemon (running as root).
+# Permissions Fix (Critical for user script access):
+# Wait 1s for socket creation, then allow read/write for all users.
 ExecStartPost=/bin/bash -c "sleep 1 && chmod 0666 /tmp/.ydotool_socket"
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 3. Enable and start the service
+# --- STEP 3: START SERVICE ---
 echo "🔥 Starting service..."
 systemctl daemon-reload
 systemctl enable --now ydotoold
 
-# 4. Copy script
+# --- STEP 4: INSTALL SCRIPT ---
 echo "📜 Copying jiggler script to /usr/local/bin..."
-# Check if source file exists just in case
 if [ -f "jiggler" ]; then
     cp jiggler /usr/local/bin/jiggler
     chmod +x /usr/local/bin/jiggler
