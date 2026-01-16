@@ -31,9 +31,9 @@
 #define LOG_FILE        "/tmp/jigglemil.log"
 #define PID_FILE        "/tmp/jigglemil.pid"
 
-#define WARNING_LIMIT_MS    5000        // 5s   - yellow/red warning (DEBUG)
-#define MIN_ACTION_MS       8000        // 8s   - minimum idle before action (DEBUG)
-#define MAX_ACTION_MS       12000       // 12s  - maximum idle before action (DEBUG)
+#define WARNING_LIMIT_MS    30000       // 30s  - red warning starts
+#define MIN_ACTION_MS       60000       // 60s  - minimum idle before action (30s red)
+#define MAX_ACTION_MS       120000      // 120s - maximum idle before action (90s red)
 #define CHECK_INTERVAL_SEC  1           // how often to check idle time
 
 // WindMouse parameters - randomized ranges for human-like variance
