@@ -99,6 +99,17 @@ echo -e "  ${GREEN}✓${NC} Installed to $PREFIX/bin/jigglemil"
 # Cleanup build artifact
 rm -f jigglemil
 
+# Install wrapper script
+if [ -f "jiggler" ]; then
+    if [ "$INSTALL_USER" -eq 0 ]; then
+        install -Dm755 jiggler "$PREFIX/bin/jiggler"
+    else
+        cp jiggler "$PREFIX/bin/jiggler"
+        chmod +x "$PREFIX/bin/jiggler"
+    fi
+    echo -e "  ${GREEN}✓${NC} Wrapper installed to $PREFIX/bin/jiggler"
+fi
+
 # ============================================================================
 # STEP 4: Setup ydotoold service (if root)
 # ============================================================================
@@ -152,7 +163,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=$PREFIX/bin/jigglemil
+ExecStart=$PREFIX/bin/jigglemil --smooth
 Restart=on-failure
 RestartSec=5
 Environment=YDOTOOL_SOCKET=/tmp/.ydotool_socket
@@ -174,16 +185,16 @@ echo -e "${GREEN}║   ✅ Installation Complete!              ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
 echo
 echo "Usage:"
-echo -e "  ${YELLOW}jigglemil${NC}              # Run in foreground"
-echo -e "  ${YELLOW}jigglemil --smooth${NC}     # Smooth mode (slower, more human)"
-echo -e "  ${YELLOW}jigglemil --verbose${NC}    # Print logs to terminal"
+echo -e "  ${YELLOW}jiggler --start${NC}        # Start daemon"
+echo -e "  ${YELLOW}jiggler --stop${NC}         # Stop daemon"
+echo -e "  ${YELLOW}jiggler --toggle${NC}       # Toggle on/off (for shortcuts)"
+echo -e "  ${YELLOW}jiggler --status${NC}       # Show state (for Executor)"
+echo -e "  ${YELLOW}jiggler --watch${NC}        # Live dashboard"
 echo
-echo "As a service:"
-echo -e "  ${YELLOW}systemctl --user start jigglemil${NC}     # Start"
-echo -e "  ${YELLOW}systemctl --user stop jigglemil${NC}      # Stop"
-echo -e "  ${YELLOW}systemctl --user enable jigglemil${NC}    # Autostart on login"
+echo "GNOME Executor extension:"
+echo -e "  Command:     ${YELLOW}jiggler --status${NC}"
+echo -e "  Left Click:  ${YELLOW}jiggler --toggle${NC}"
 echo
 echo "Monitor:"
-echo -e "  ${YELLOW}cat /tmp/jigglemil.state${NC}             # Current status"
 echo -e "  ${YELLOW}tail -f /tmp/jigglemil.log${NC}           # Live logs"
 echo

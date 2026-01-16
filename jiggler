@@ -1,0 +1,53 @@
+#!/bin/bash
+# Jiggler - wrapper for jigglemil daemon
+
+STATE_FILE="/tmp/jigglemil.state"
+
+case "$1" in
+    --start)
+        if pgrep -x jigglemil > /dev/null; then
+            notify-send "Jigglemil" "Already running!" 2>/dev/null
+            exit 0
+        fi
+        # Try systemctl first, fallback to direct run
+        if systemctl --user start jigglemil 2>/dev/null; then
+            notify-send "Jigglemil" "Started (service)" 2>/dev/null
+        else
+            jigglemil --smooth &
+            notify-send "Jigglemil" "Started" 2>/dev/null
+        fi
+        ;;
+
+    --stop)
+        systemctl --user stop jigglemil 2>/dev/null
+        pkill -x jigglemil 2>/dev/null
+        echo "black" > "$STATE_FILE"
+        notify-send "Jigglemil" "Stopped" 2>/dev/null
+        ;;
+
+    --toggle)
+        if pgrep -x jigglemil > /dev/null; then
+            $0 --stop
+        else
+            $0 --start
+        fi
+        ;;
+
+    --status)
+        cat "$STATE_FILE" 2>/dev/null || echo "black"
+        ;;
+
+    --watch)
+        jigglemil --watch --smooth
+        ;;
+
+    *)
+        echo "Usage: jiggler {--start|--stop|--toggle|--status|--watch}"
+        echo ""
+        echo "  --start   Start daemon in background"
+        echo "  --stop    Stop daemon"
+        echo "  --toggle  Toggle on/off (for desktop shortcuts)"
+        echo "  --status  Print current state (green/red/white/black)"
+        echo "  --watch   Run with live dashboard"
+        ;;
+esac
