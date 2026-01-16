@@ -120,9 +120,14 @@ void display_watch(const char *status, const char *emoji, long idle_ms, long act
     if (!g_watch_mode) return;
 
     long idle_sec = idle_ms / 1000;
-    long limit_sec = action_limit / 1000;
-    long countdown = (action_limit - idle_ms) / 1000;
-    if (countdown < 0) countdown = 0;
+    long warning_sec = WARNING_LIMIT_MS / 1000;  // 30s
+
+    // Calculate timers
+    long green_left = warning_sec - idle_sec;  // time until red
+    if (green_left < 0) green_left = 0;
+
+    long red_left = (action_limit - idle_ms) / 1000;  // time until action
+    if (red_left < 0) red_left = 0;
 
     char ts[16];
     get_timestamp(ts, sizeof(ts));
@@ -134,11 +139,19 @@ void display_watch(const char *status, const char *emoji, long idle_ms, long act
     printf("       JIGGLEMIL - WATCH MODE\n");
     printf("═══════════════════════════════════════════\n");
     printf("\n");
-    printf("  %s  Status:    %s\n", emoji, status);
+    printf("  %s  %s\n", emoji, status);
     printf("\n");
-    printf("      Idle:      %ld s\n", idle_sec);
-    printf("      Trigger:   %ld s\n", limit_sec);
-    printf("      Countdown: %ld s\n", countdown);
+
+    if (idle_sec < warning_sec) {
+        // Green phase - show countdown to red
+        printf("      Green:  %2ld s  ↓\n", green_left);
+        printf("      Red:    --\n");
+    } else {
+        // Red phase - show countdown to action
+        printf("      Green:   0 s\n");
+        printf("      Red:   %2ld s  ↓\n", red_left);
+    }
+
     printf("\n");
     printf("═══════════════════════════════════════════\n");
     printf("  [%s]  Mode: %s\n", ts, g_smooth_mode ? "SMOOTH" : "BATCH");
