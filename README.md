@@ -4,6 +4,8 @@
 
 A native C daemon that keeps your session alive using human-like mouse movements. Works on **Wayland** where other tools fail.
 
+![Demo](demo.gif)
+
 ## Why This Works (And Others Don't)
 
 | Tool | Method | Detectable? |
