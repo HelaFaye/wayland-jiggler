@@ -43,18 +43,35 @@ else
     echo -e "  ${GREEN}✓${NC} gcc found"
 fi
 
-# Check ydotool
-if ! command -v ydotool &> /dev/null; then
-    echo -e "  ${RED}✗${NC} ydotool not found"
+# Check ydotool and find ydotoold path
+YDOTOOLD_BIN=""
+if [ -f "/usr/local/bin/ydotoold" ]; then
+    YDOTOOLD_BIN="/usr/local/bin/ydotoold"
+    echo -e "  ${GREEN}✓${NC} ydotoold found (compiled: $YDOTOOLD_BIN)"
+elif [ -f "/usr/bin/ydotoold" ]; then
+    YDOTOOLD_BIN="/usr/bin/ydotoold"
+    echo -e "  ${GREEN}✓${NC} ydotoold found (package: $YDOTOOLD_BIN)"
+elif command -v ydotoold &> /dev/null; then
+    YDOTOOLD_BIN="$(which ydotoold)"
+    echo -e "  ${GREEN}✓${NC} ydotoold found ($YDOTOOLD_BIN)"
+else
+    echo -e "  ${RED}✗${NC} ydotoold not found"
     if [ "$INSTALL_USER" -eq 0 ]; then
         echo "    Installing ydotool..."
         apt-get update && apt-get install -y ydotool
+        YDOTOOLD_BIN="/usr/bin/ydotoold"
     else
         echo -e "    ${RED}Please install ydotool: sudo apt install ydotool${NC}"
         exit 1
     fi
+fi
+
+# Check ydotool client
+if ! command -v ydotool &> /dev/null; then
+    echo -e "  ${RED}✗${NC} ydotool client not found"
+    exit 1
 else
-    echo -e "  ${GREEN}✓${NC} ydotool found"
+    echo -e "  ${GREEN}✓${NC} ydotool client found"
 fi
 
 # Check notify-send (optional)
@@ -118,8 +135,8 @@ echo
 echo -e "${YELLOW}[4/4]${NC} Configuring ydotoold service..."
 
 if [ "$INSTALL_USER" -eq 0 ]; then
-    # Create systemd service for ydotoold
-    cat > /etc/systemd/system/ydotoold.service << 'EOF'
+    # Create systemd service for ydotoold (using detected path)
+    cat > /etc/systemd/system/ydotoold.service << EOF
 [Unit]
 Description=ydotool daemon
 Documentation=man:ydotoold(8)
@@ -129,7 +146,7 @@ After=network.target
 Type=simple
 Restart=always
 RestartSec=3
-ExecStart=/usr/bin/ydotoold --socket-path=/tmp/.ydotool_socket
+ExecStart=$YDOTOOLD_BIN --socket-path=/tmp/.ydotool_socket
 ExecStartPost=/bin/sleep 1
 ExecStartPost=/bin/chmod 0666 /tmp/.ydotool_socket
 
