@@ -442,7 +442,7 @@ int main(int argc, char *argv[]) {
     log_msg(msg);
     log_msg("═══════════════════════════════════════");
 
-    save_state("green");
+    save_state("🟢");
     notify("Jigglemil", "Running");
 
     // Show initial watch display
@@ -459,8 +459,8 @@ int main(int argc, char *argv[]) {
 
         if (idle_ms > action_limit) {
             // === ACTION (WHITE) ===
-            save_state("white");
-            display_watch("ACTION!", "⚪", idle_ms, action_limit);
+            save_state("🟡");
+            display_watch("ACTION!", "🟡", idle_ms, action_limit);
 
             snprintf(msg, sizeof(msg), "ACTION! Idle: %lds / Limit: %lds",
                      idle_ms / 1000, action_limit / 1000);
@@ -474,19 +474,19 @@ int main(int argc, char *argv[]) {
             snprintf(msg, sizeof(msg), "Done. Next trigger: %lds", action_limit / 1000);
             log_msg(msg);
 
-            save_state("green");
+            save_state("🟢");
 
             // Wait for system to register activity
             sleep(3);
 
         } else if (idle_ms > WARNING_LIMIT_MS) {
             // === WARNING (RED) ===
-            save_state("red");
+            save_state("🔴");
             display_watch("WARNING", "🔴", idle_ms, action_limit);
 
         } else {
             // === SAFE (GREEN) ===
-            save_state("green");
+            save_state("🟢");
             display_watch("SAFE", "🟢", idle_ms, action_limit);
         }
 
@@ -501,7 +501,7 @@ int main(int argc, char *argv[]) {
     log_msg("JIGGLEMIL STOPPED (signal received)");
     log_msg("═══════════════════════════════════════");
 
-    save_state("black");
+    save_state("⚫");
     remove_pid();
     notify("Jigglemil", "Stopped");
 
