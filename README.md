@@ -1,69 +1,214 @@
-# 🖱️ Wayland Jiggler (The Ultimate Anti-Idle Tool)
+# Jigglemil
 
 > **Keep your status Green.** Fight the micromanagement. Stay active.
 
-![Jiggler Demo](gif.gif)
+A native C daemon that keeps your session alive using human-like mouse movements. Works on **Wayland** where other tools fail.
 
-Most mouse jigglers break on **Linux Wayland** or require heavy GUI apps. This is a **lightweight, intelligent Bash script** that uses native system calls (`gdbus` + `ydotool`) to keep your session alive only when necessary.
+![Status Demo](gif.gif)
 
-It mimics human behavior and integrates seamlessly with your desktop environment.
+## Why This Works (And Others Don't)
 
-## 🚀 Why this one?
+| Tool | Method | Detectable? |
+|------|--------|-------------|
+| Caffeine | Inhibits screensaver via D-Bus | **Trivial** - just a flag |
+| xdotool | X11 synthetic events | **Easy** - tagged as synthetic |
+| Mouse jigglers (USB) | Hardware HID events | Detectable by device ID |
+| **Jigglemil** | uinput kernel events | **Indistinguishable from real hardware** |
 
-* **Wayland Native:** Works where `xdotool` fails.
-* **Intelligent Traffic Light System:**
-    * 🟢 **Green:** You are active (or Jiggler is monitoring).
-    * 🔴 **Red:** Warning (30s idle). Jiggler is about to take over.
-    * ⚪ **White:** Action! (60s idle). Draws a square to reset the idle timer.
-* **Stealth Mode:** Does not inject input constantly. It waits for the system idle timer to hit the threshold, performs one action, and sleeps.
-* **The Matrix Mode:** Watch live logs with `--watch` to see exactly what the script is thinking.
-* **GNOME Integrated:** Designed to work with the "Executor" extension to provide a clean, minimalist status dot on your top bar.
+### The Secret Sauce
 
-## 📦 Installation
+1. **Kernel-level injection** - Uses `ydotool` which writes directly to `/dev/uinput`. From the kernel's perspective, this IS a real input device.
 
-1.  Clone this repository:
-    ```bash
-    git clone [https://github.com/emilszymecki/wayland-jiggler.git](https://github.com/emilszymecki/wayland-jiggler.git)
-    cd wayland-jiggler
-    ```
+2. **WindMouse algorithm** - Borrowed from game bot research. Creates curved, organic trajectories with simulated "wind" and "gravity" instead of robotic straight lines.
 
-2.  Run the installer (handles dependencies like `ydotool` and permissions):
-    ```bash
-    chmod +x install.sh
-    sudo ./install.sh
-    ```
+3. **Chaotic timing** - No fixed intervals. Action triggers are randomized between 35-120 seconds. Zero temporal signature.
 
-3.  **Done!** Type `jiggler --start` in your terminal.
+## Quick Start
 
-## 🎮 Usage
+```bash
+git clone https://github.com/emilszymecki/wayland-jiggler.git
+cd wayland-jiggler
+chmod +x install.sh
+sudo ./install.sh
 
-| Command | Description |
-| :--- | :--- |
-| `jiggler --start` | Starts the daemon in the background. |
-| `jiggler --stop` | Stops the daemon. |
-| `jiggler --toggle` | Smart toggle (useful for toolbar buttons). |
-| `jiggler --status` | Returns current state icon (🟢/🔴/⚪/⚫) for integration. |
-| `jiggler --watch` | **Live Debug Mode.** View the countdown and logic in real-time. |
+# Run it
+jigglemil
+```
 
-## 🧩 GNOME Top Bar Integration (Recommended)
+## Installation Options
 
-To transform this script into a **minimalist, color-changing status dot** on your top bar (like a system indicator), use the **Executor** extension.
+### Option A: System-wide (recommended)
+```bash
+sudo ./install.sh
+```
+This will:
+- Install `jigglemil` to `/usr/local/bin/`
+- Configure `ydotoold` systemd service
+- Create user service file
 
-1.  Install the **Executor** extension for GNOME.
-2.  Open Executor settings and configure a new command:
-    * **Command:** `jiggler --status`
-    * **Interval:** `1` (Update every second for real-time feedback)
-    * **Left Click:** `jiggler --toggle`
-3.  **Result:** You will see a clean dot next to your clock that changes automatically:
-    * ⚫ **Off** (Script stopped)
-    * 🟢 **Monitoring** (Safe zone)
-    * 🔴 **Warning** (Idle > 30s)
-    * ⚪ **Action** (Drawing square)
+### Option B: User-local
+```bash
+./install.sh  # without sudo
+```
+Installs to `~/.local/bin/` (make sure it's in your PATH)
 
-## 🛠️ Requirements
-* Linux with **GNOME Desktop** (uses `org.gnome.Mutter.IdleMonitor`).
-* **Wayland** session (can work on X11 but it's designed for Wayland).
-* `ydotool` (installed automatically by the script).
+### Option C: Manual
+```bash
+gcc -Wall -Wextra -O2 -std=c11 -o jigglemil src/jigglemil.c -lm
+sudo cp jigglemil /usr/local/bin/
+```
 
-## 📄 License
-MIT License. Free to use, modify, and distribute.
+## Usage
+
+### Foreground (see what's happening)
+```bash
+jigglemil --watch
+```
+
+### Background (daemon mode)
+```bash
+jigglemil &
+# or better:
+systemctl --user start jigglemil
+```
+
+### As a service (auto-start on login)
+```bash
+systemctl --user enable --now jigglemil
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--watch` | Live dashboard mode - see status, idle time, countdown in real-time |
+| `--smooth` | Individual mouse moves with delays. Slower but more human-like. |
+| `--help` | Show help |
+
+## Status Indicators
+
+The daemon writes its state to `/tmp/jigglemil.state`:
+
+| State | Meaning |
+|-------|---------|
+| green | Safe - user is active or jigglemil is monitoring |
+| red | Warning - idle > 30s, action imminent |
+| white | Action - performing mouse movement |
+| black | Stopped |
+
+### GNOME Integration (Executor Extension)
+
+1. Install the [Executor](https://extensions.gnome.org/extension/2932/executor/) extension
+2. Add new command:
+   - **Command:** `cat /tmp/jigglemil.state`
+   - **Interval:** `1`
+   - **Left Click:** `systemctl --user start jigglemil`
+   - **Right Click:** `systemctl --user stop jigglemil`
+
+Result: A live status indicator in your top bar.
+
+## Monitoring
+
+```bash
+# Current status
+cat /tmp/jigglemil.state
+
+# Live logs
+tail -f /tmp/jigglemil.log
+
+# Check if running
+cat /tmp/jigglemil.pid
+```
+
+## How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       JIGGLEMIL                             │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐    ┌──────────────┐    ┌───────────────┐  │
+│  │ Idle Timer  │───>│ WindMouse    │───>│ ydotool       │  │
+│  │ (gdbus)     │    │ (path gen)   │    │ (executor)    │  │
+│  └─────────────┘    └──────────────┘    └───────┬───────┘  │
+│                                                  │          │
+│                                                  v          │
+│                                          ┌──────────────┐   │
+│                                          │ /dev/uinput  │   │
+│                                          │ (kernel)     │   │
+│                                          └──────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **Monitor** - Polls GNOME's `IdleMonitor` every 2 seconds
+2. **Decide** - If idle exceeds randomized threshold (35-120s), trigger action
+3. **Generate** - WindMouse algorithm creates curved trajectory (pure math, no I/O)
+4. **Execute** - Single batched `ydotool` command injects all movements
+5. **Reset** - Randomize next threshold, return to monitoring
+
+## Configuration
+
+Edit `src/jigglemil.c` constants:
+
+```c
+#define WARNING_LIMIT_MS    30000   // When to show red (30s)
+#define MIN_ACTION_MS       35000   // Minimum idle before action
+#define MAX_ACTION_MS       120000  // Maximum idle before action
+#define MOUSE_SPEED         35.0    // Lower = faster mouse
+#define GRAVITY             9.0     // Pull toward target
+#define WIND                3.0     // Random drift amount
+```
+
+Then recompile: `gcc -Wall -Wextra -O2 -std=c11 -o jigglemil src/jigglemil.c -lm`
+
+## Troubleshooting
+
+### "ydotool: command not found"
+```bash
+sudo apt install ydotool
+```
+
+### "failed to connect socket"
+```bash
+# Start the ydotool daemon
+sudo systemctl enable --now ydotoold
+
+# Or manually:
+sudo ydotoold --socket-path=/tmp/.ydotool_socket &
+sudo chmod 666 /tmp/.ydotool_socket
+```
+
+### Mouse not moving
+```bash
+# Check if ydotool works
+export YDOTOOL_SOCKET=/tmp/.ydotool_socket
+ydotool mousemove -- 50 50
+
+# Check idle detection
+gdbus call --session --dest org.gnome.Mutter.IdleMonitor \
+  --object-path /org/gnome/Mutter/IdleMonitor/Core \
+  --method org.gnome.Mutter.IdleMonitor.GetIdletime
+```
+
+### KDE/Sway support
+Currently designed for GNOME (uses `org.gnome.Mutter.IdleMonitor`).
+
+For KDE, you'd need to replace the idle detection with:
+```bash
+qdbus org.kde.screensaver /ScreenSaver GetSessionIdleTime
+```
+
+PRs welcome!
+
+## License
+
+MIT License - do whatever you want.
+
+## Credits
+
+- **WindMouse algorithm** - Adapted from Ben Land's implementation
+- **ydotool** - The magic behind kernel-level input injection
+- **Claude** - Pair programming partner
+
+---
+
+*Made with mass distrust of activity monitoring*

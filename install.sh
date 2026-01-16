@@ -1,78 +1,189 @@
 #!/bin/bash
+set -e
 
-echo "🚀 Installing Wayland Jiggler..."
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-if [ "$EUID" -ne 0 ]; then 
-  echo "❌ Please run as root (sudo ./install.sh)"
-  exit 1
-fi
+echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   Jigglemil - Installation               ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+echo
 
-# --- STEP 1: SMART YDOTOOL DETECTION ---
-YDO_BIN=""
-
-# Check for manually compiled version (High Priority)
-# Matches our "Build from Source" guide in LLM.md
-if [ -f "/usr/local/bin/ydotoold" ]; then
-    echo "💎 Found manually compiled version at /usr/local/bin/ydotoold"
-    YDO_BIN="/usr/local/bin/ydotoold"
-
-# Check for existing system package
-elif [ -f "/usr/bin/ydotoold" ]; then
-    echo "📦 Found system package version at /usr/bin/ydotoold"
-    YDO_BIN="/usr/bin/ydotoold"
-
+# Check root for system-wide install
+INSTALL_USER=0
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${YELLOW}⚠ Not running as root. Installing to ~/.local/bin${NC}"
+    INSTALL_USER=1
+    PREFIX="$HOME/.local"
+    mkdir -p "$PREFIX/bin"
 else
-    # Fallback: Install via APT for lazy users
-    echo "⚠️  ydotoold not found. Attempting install via APT..."
-    apt-get update && apt-get install -y ydotool
-    YDO_BIN="/usr/bin/ydotoold"
+    PREFIX="/usr/local"
 fi
 
-# Final Validation
-if [ ! -f "$YDO_BIN" ]; then
-    echo "❌ CRITICAL ERROR: Could not find or install ydotool."
-    echo "👉 Please compile manually following instructions in LLM.md"
+# ============================================================================
+# STEP 1: Dependencies
+# ============================================================================
+
+echo -e "${YELLOW}[1/4]${NC} Checking dependencies..."
+
+# Check GCC
+if ! command -v gcc &> /dev/null; then
+    echo -e "  ${RED}✗${NC} gcc not found"
+    if [ "$INSTALL_USER" -eq 0 ]; then
+        echo "    Installing build-essential..."
+        apt-get update && apt-get install -y build-essential
+    else
+        echo -e "    ${RED}Please install gcc: sudo apt install build-essential${NC}"
+        exit 1
+    fi
+else
+    echo -e "  ${GREEN}✓${NC} gcc found"
+fi
+
+# Check ydotool
+if ! command -v ydotool &> /dev/null; then
+    echo -e "  ${RED}✗${NC} ydotool not found"
+    if [ "$INSTALL_USER" -eq 0 ]; then
+        echo "    Installing ydotool..."
+        apt-get update && apt-get install -y ydotool
+    else
+        echo -e "    ${RED}Please install ydotool: sudo apt install ydotool${NC}"
+        exit 1
+    fi
+else
+    echo -e "  ${GREEN}✓${NC} ydotool found"
+fi
+
+# Check notify-send (optional)
+if command -v notify-send &> /dev/null; then
+    echo -e "  ${GREEN}✓${NC} notify-send found"
+else
+    echo -e "  ${YELLOW}○${NC} notify-send not found (optional)"
+fi
+
+# ============================================================================
+# STEP 2: Compile
+# ============================================================================
+
+echo
+echo -e "${YELLOW}[2/4]${NC} Compiling..."
+
+cd "$(dirname "$0")"
+
+if [ -f "src/jigglemil.c" ]; then
+    gcc -Wall -Wextra -O2 -std=c11 -o jigglemil src/jigglemil.c -lm
+    echo -e "  ${GREEN}✓${NC} Compilation successful"
+else
+    echo -e "  ${RED}✗${NC} src/jigglemil.c not found!"
     exit 1
 fi
 
-# --- STEP 2: SERVICE CONFIGURATION ---
-echo "⚙️  Configuring systemd service using: $YDO_BIN"
+# ============================================================================
+# STEP 3: Install binary
+# ============================================================================
 
-cat <<EOF > /etc/systemd/system/ydotoold.service
+echo
+echo -e "${YELLOW}[3/4]${NC} Installing binary..."
+
+if [ "$INSTALL_USER" -eq 0 ]; then
+    install -Dm755 jigglemil "$PREFIX/bin/jigglemil"
+else
+    cp jigglemil "$PREFIX/bin/jigglemil"
+    chmod +x "$PREFIX/bin/jigglemil"
+fi
+echo -e "  ${GREEN}✓${NC} Installed to $PREFIX/bin/jigglemil"
+
+# Cleanup build artifact
+rm -f jigglemil
+
+# ============================================================================
+# STEP 4: Setup ydotoold service (if root)
+# ============================================================================
+
+echo
+echo -e "${YELLOW}[4/4]${NC} Configuring ydotoold service..."
+
+if [ "$INSTALL_USER" -eq 0 ]; then
+    # Create systemd service for ydotoold
+    cat > /etc/systemd/system/ydotoold.service << 'EOF'
 [Unit]
-Description=ydotool daemon (Jiggler backend)
-Wants=network.target
+Description=ydotool daemon
+Documentation=man:ydotoold(8)
 After=network.target
 
 [Service]
 Type=simple
 Restart=always
 RestartSec=3
-
-# Using the detected binary path variable
-ExecStart=$YDO_BIN --socket-path=/tmp/.ydotool_socket --background
-
-# Permissions Fix (Critical for user script access):
-# Wait 1s for socket creation, then allow read/write for all users.
-ExecStartPost=/bin/bash -c "sleep 1 && chmod 0666 /tmp/.ydotool_socket"
+ExecStart=/usr/bin/ydotoold --socket-path=/tmp/.ydotool_socket
+ExecStartPost=/bin/sleep 1
+ExecStartPost=/bin/chmod 0666 /tmp/.ydotool_socket
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# --- STEP 3: START SERVICE ---
-echo "🔥 Starting service..."
-systemctl daemon-reload
-systemctl enable --now ydotoold
+    # Reload and enable
+    systemctl daemon-reload
+    systemctl enable --now ydotoold 2>/dev/null || true
 
-# --- STEP 4: INSTALL SCRIPT ---
-echo "📜 Copying jiggler script to /usr/local/bin..."
-if [ -f "jiggler" ]; then
-    cp jiggler /usr/local/bin/jiggler
-    chmod +x /usr/local/bin/jiggler
+    echo -e "  ${GREEN}✓${NC} ydotoold service configured"
 else
-    echo "⚠️  Warning: 'jiggler' file not found in current directory. Skipping copy."
+    echo -e "  ${YELLOW}○${NC} Skipped (need root for systemd)"
+    echo -e "    ${YELLOW}Make sure ydotoold is running:${NC}"
+    echo -e "    sudo systemctl enable --now ydotoold"
 fi
 
-echo "✅ Installation Complete!"
-echo "👉 You can now run: jiggler --start"
+# ============================================================================
+# STEP 5: Optional - User systemd service for jigglemil
+# ============================================================================
+
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+
+cat > "$SYSTEMD_USER_DIR/jigglemil.service" << EOF
+[Unit]
+Description=Jigglemil - Keep your status green
+Documentation=https://github.com/emilszymecki/wayland-jiggler
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$PREFIX/bin/jigglemil
+Restart=on-failure
+RestartSec=5
+Environment=YDOTOOL_SOCKET=/tmp/.ydotool_socket
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload 2>/dev/null || true
+echo -e "  ${GREEN}✓${NC} User service installed: ~/.config/systemd/user/jigglemil.service"
+
+# ============================================================================
+# DONE
+# ============================================================================
+
+echo
+echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   ✅ Installation Complete!              ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+echo
+echo "Usage:"
+echo -e "  ${YELLOW}jigglemil${NC}              # Run in foreground"
+echo -e "  ${YELLOW}jigglemil --smooth${NC}     # Smooth mode (slower, more human)"
+echo -e "  ${YELLOW}jigglemil --verbose${NC}    # Print logs to terminal"
+echo
+echo "As a service:"
+echo -e "  ${YELLOW}systemctl --user start jigglemil${NC}     # Start"
+echo -e "  ${YELLOW}systemctl --user stop jigglemil${NC}      # Stop"
+echo -e "  ${YELLOW}systemctl --user enable jigglemil${NC}    # Autostart on login"
+echo
+echo "Monitor:"
+echo -e "  ${YELLOW}cat /tmp/jigglemil.state${NC}             # Current status"
+echo -e "  ${YELLOW}tail -f /tmp/jigglemil.log${NC}           # Live logs"
+echo

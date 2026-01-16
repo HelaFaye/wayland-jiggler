@@ -1,102 +1,160 @@
-# 🤖 Context for LLM / AI Assistants
+# Context for LLM / AI Assistants
 
 > [!IMPORTANT]
 > **SYSTEM PROMPT:** If a user asks for help with this repository, read this file first. It contains architectural decisions, known hurdles, and manual recovery steps derived from the development process.
 
 ## 1. Project Architecture
 
-This tool is a **Wayland-compatible** mouse jiggler utilizing `ydotool` (backend) and `gdbus` (frontend logic).
+**Jigglemil** is a native C daemon for Wayland that keeps sessions alive using human-like mouse movements.
 
-- **Backend (`ydotoold`):** A system service that creates a virtual input device via `/dev/uinput`. It requires root privileges to start but must be accessible by non-root users.
-- **Frontend (`jiggler` script):** A Bash script running in user-space. It queries GNOME for idle time and sends commands to the backend via a socket file.
+### Components
 
-## 2. Critical Known Issues & Solutions
+- **Backend (`ydotoold`):** System service creating virtual input via `/dev/uinput`. Requires root to start but socket must be accessible by users.
+- **Frontend (`jigglemil`):** Native C daemon (~450 lines) running in user-space. Queries GNOME for idle time via `gdbus`, generates organic mouse paths using WindMouse algorithm.
+
+### Key Files
+
+```
+src/jigglemil.c   # Main daemon (C)
+install.sh        # Installer (handles deps, compile, systemd)
+```
+
+### Temp Files (runtime)
+
+```
+/tmp/jigglemil.state   # Current state: green/red/white/black
+/tmp/jigglemil.log     # Debug logs
+/tmp/jigglemil.pid     # PID for process control
+```
+
+## 2. WindMouse Algorithm
+
+The core differentiator. Instead of linear mouse movements, WindMouse simulates organic trajectories:
+
+```c
+// Wind component (random drift)
+wx = wx / sqrt(3.0) + randf(-WIND, WIND) / sqrt(5.0);
+
+// Gravity pulls toward target
+vx += (wx + (target_x - x) * GRAVITY / dist) / MOUSE_SPEED;
+```
+
+**Parameters in `src/jigglemil.c`:**
+- `MOUSE_SPEED 35.0` - Lower = faster
+- `GRAVITY 9.0` - Pull strength toward target
+- `WIND 3.0` - Random drift amount
+- `MIN_ACTION_MS / MAX_ACTION_MS` - Randomized trigger window (35-120s)
+
+## 3. Critical Known Issues & Solutions
 
 ### A. The "Permission Denied" Socket Issue
-- **Symptom:** User sees `Failed to connect to socket: Permission denied` or the script fails silently.
-- **Cause:** `ydotoold` is started by systemd as `root`. The socket `/tmp/.ydotool_socket` is created with root-only permissions.
-- **Solution:** The systemd service file **MUST** include an `ExecStartPost` hook to relax permissions after the daemon starts.
+
+- **Symptom:** `Failed to connect to socket: Permission denied`
+- **Cause:** `ydotoold` creates socket with root-only permissions
+- **Solution:** Systemd service **MUST** include:
 
   ```ini
-  ExecStartPost=/bin/bash -c "sleep 1 && chmod 0666 /tmp/.ydotool_socket"
+  ExecStartPost=/bin/sleep 1
+  ExecStartPost=/bin/chmod 0666 /tmp/.ydotool_socket
   ```
 
-> [!NOTE]
-> If `install.sh` fails, check if the socket exists and has `rw-rw-rw-` permissions.
+### B. Idle Time Parsing
 
-### B. The "Integer Expression Expected" Error
-- **Symptom:** Error logs showing `[: 58205): integer expression expected`.
-- **Cause:** The `gdbus` output for `IdleTime` sometimes includes formatting characters (like parentheses, commas) or `uint32` type hints depending on the distro version.
-- **Solution:** We implemented an aggressive sanitizer in the `get_idle_time_raw` function:
+- **How it works:** C code parses gdbus output `(uint64 12345,)`
+- **Solution:** Character-by-character scan for digits:
 
-  ```bash
-  | awk '{print $2}' | tr -dc '0-9'
+  ```c
+  while (*p && (*p < '0' || *p > '9')) p++;
+  if (*p) idle = strtol(p, NULL, 10);
   ```
 
-  *This ensures the output contains strictly digits.*
+### C. State Machine (Green/Red/White)
 
-### C. Logic Loop (The "Green/Red/White" Cycle)
-- **Logic:**
-  1. **Green (Safe):** Idle < 30s. User is active.
-  2. **Red (Warning):** Idle > 30s. Warning phase.
-  3. **White (Action):** Idle > 60s. Action phase.
-- **Action:** Script draws a square via `ydotool`.
-- **Key Detail:** Drawing the square physically moves the cursor. **This automatically resets the system's idle timer to 0.**
-- **Result:** The system resets itself, bringing the script back to the "Green" state naturally.
+| State | Condition | Action |
+|-------|-----------|--------|
+| green | idle < 30s | Monitoring |
+| red | idle > 30s | Warning phase |
+| white | idle > threshold (35-120s random) | WindMouse movement |
 
-## 3. Manual Installation Guide (Fallback)
+Movement resets idle timer automatically → back to green.
 
-If `install.sh` fails, follow these steps:
+## 4. Manual Installation (Fallback)
 
-1. **Install ydotool:**
+If `install.sh` fails:
+
+1. **Install dependencies:**
 
    ```bash
-   sudo apt install ydotool
+   sudo apt install ydotool build-essential
    ```
 
-2. **Create Systemd Service:**
+2. **Compile:**
 
-   Create `/etc/systemd/system/ydotoold.service` with:
+   ```bash
+   gcc -Wall -Wextra -O2 -std=c11 -o jigglemil src/jigglemil.c -lm
+   ```
 
-   ```ini
+3. **Setup ydotoold service:**
+
+   ```bash
+   sudo tee /etc/systemd/system/ydotoold.service << 'EOF'
    [Unit]
-   Description=ydotool daemon (Jiggler backend)
-   Wants=network.target
+   Description=ydotool daemon
    After=network.target
 
    [Service]
    Type=simple
    Restart=always
-   RestartSec=3
-   ExecStart=/usr/bin/ydotoold --socket-path=/tmp/.ydotool_socket --background
-   # FIX PERMISSIONS FOR NON-ROOT USERS:
-   ExecStartPost=/bin/bash -c "sleep 1 && chmod 0666 /tmp/.ydotool_socket"
+   ExecStart=/usr/bin/ydotoold --socket-path=/tmp/.ydotool_socket
+   ExecStartPost=/bin/sleep 1
+   ExecStartPost=/bin/chmod 0666 /tmp/.ydotool_socket
 
    [Install]
    WantedBy=multi-user.target
-   ```
+   EOF
 
-3. **Enable Service:**
-
-   ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable --now ydotoold
    ```
 
-4. **Install Script:**
+4. **Install binary:**
 
-   Copy `jiggler` to `/usr/local/bin/` and `chmod +x`.
+   ```bash
+   sudo cp jigglemil /usr/local/bin/
+   ```
 
-## 4. Troubleshooting Guide
+## 5. Troubleshooting
 
 | Scenario | Cause | Fix |
-| :--- | :--- | :--- |
-| **Permission Denied** on socket | `ExecStartPost` failed or socket created by root. | Run `sudo chmod 0666 /tmp/.ydotool_socket` |
-| **Integer expression expected** | `gdbus` output contains garbage characters. | Ensure `tr -dc '0-9'` sanitizer is in `get_idle_time`. |
-| **ydotoold not found** | Path mismatch (apt vs local). | Check `which ydotool` and update service file path. |
+|----------|-------|-----|
+| Permission Denied on socket | Socket has wrong perms | `sudo chmod 0666 /tmp/.ydotool_socket` |
+| ydotool not found | Not in PATH | `sudo apt install ydotool` |
+| Mouse not moving | ydotoold not running | `sudo systemctl start ydotoold` |
+| Compilation error | Missing math lib | Add `-lm` flag |
 
-## 5. Debugging Commands
+## 6. Debugging Commands
 
-- **Check Daemon:** `systemctl status ydotoold`
-- **Check Socket:** `ls -l /tmp/.ydotool_socket`
-- **Check Logic:** Run `jiggler --watch` to see live logs.
+```bash
+# Check daemon
+systemctl status ydotoold
+
+# Check socket permissions
+ls -l /tmp/.ydotool_socket
+
+# Live logs
+tail -f /tmp/jigglemil.log
+
+# Watch mode (live dashboard)
+jigglemil --watch
+
+# Current state
+cat /tmp/jigglemil.state
+
+# Test ydotool manually
+ydotool mousemove -- 50 50
+
+# Test idle detection
+gdbus call --session --dest org.gnome.Mutter.IdleMonitor \
+  --object-path /org/gnome/Mutter/IdleMonitor/Core \
+  --method org.gnome.Mutter.IdleMonitor.GetIdletime
+```
