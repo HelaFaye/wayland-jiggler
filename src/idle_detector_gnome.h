@@ -1,8 +1,7 @@
-// idle_detector_old.h
-// Backwards-compatible idle detection using GNOME/Mutter D-Bus
+// // Idle detection using GNOME/Mutter D-Bus
 
-#ifndef IDLE_DETECTOR_OLD_H
-#define IDLE_DETECTOR_OLD_H
+#ifndef IDLE_DETECTOR_GNOME_H
+#define IDLE_DETECTOR_GNOME_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,4 +36,4 @@ static long get_idle_time(void) {
     return idle;
 }
 
-#endif // IDLE_DETECTOR_OLD_H
+#endif // IDLE_DETECTOR_GNOME_H

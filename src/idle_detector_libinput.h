@@ -1,4 +1,3 @@
-// idle_detector.h
 // Plasma 6 / Wayland replacement for Jigglemil get_idle_time()
 // Tracks mouse + keyboard activity via libinput and returns idle time in ms
 
