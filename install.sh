@@ -274,10 +274,13 @@ echo -e "  ${YELLOW}jiggler --toggle${NC}       # Toggle on/off (for shortcuts)"
 echo -e "  ${YELLOW}jiggler --status${NC}       # Show state (for Executor)"
 echo -e "  ${YELLOW}jiggler --watch${NC}        # Live dashboard"
 echo
-echo "GNOME Executor extension:"
-echo -e "  Command:     ${YELLOW}jiggler --status${NC}"
-echo -e "  Left Click:  ${YELLOW}jiggler --toggle${NC}"
-echo
+if [[ "$XDG_CURRENT_DESKTOP" =~ GNOME ]]; then
+    echo
+    echo "GNOME Executor extension:"
+    echo -e "  Command:     ${YELLOW}jiggler --status${NC}"
+    echo -e "  Left Click:  ${YELLOW}jiggler --toggle${NC}"
+    echo
+fi
 echo "Monitor:"
 echo -e "  ${YELLOW}tail -f /tmp/jigglemil.log${NC}           # Live logs"
 echo
