@@ -143,7 +143,7 @@ if pkg-config --exists libinput; then
 elif [ -e /dev/input/event0 ]; then
     echo -e "  ${GREEN}✓${NC} /dev/input devices found - using libinput idle method"
 else
-    # fallback to old GNOME idle detection
+    # fallback to GNOME idle detection
     echo -e "  ${YELLOW}⚠ libinput not found - using GNOME idle method${NC}"
     USE_GNOME_IDLE_FLAG="-DUSE_GNOME_IDLE"
 fi
