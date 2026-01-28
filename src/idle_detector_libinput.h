@@ -1,4 +1,4 @@
-// Plasma 6 / Wayland replacement for Jigglemil get_idle_time()
+// libinput implementation for Jigglemil get_idle_time()
 // Tracks mouse + keyboard activity via libinput and returns idle time in ms
 
 #ifndef IDLE_DETECTOR_H
@@ -10,10 +10,11 @@
 #include <fcntl.h>
 #include <time.h>
 #include <pthread.h>
-#include <libinput.h>
-#include <libudev.h>
 #include <errno.h>
 #include <string.h>
+#include <poll.h>
+#include <libinput.h>
+#include <libudev.h>
 
 static pthread_mutex_t idle_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct timespec last_activity;
@@ -47,45 +48,69 @@ static void* input_monitor_thread(void *arg) {
     (void)arg;
 
     struct libinput_interface iface = {
-        .open_restricted = open_restricted,
+        .open_restricted  = open_restricted,
         .close_restricted = close_restricted
     };
 
     struct udev *udev_ctx = udev_new();
     if (!udev_ctx) {
-        fprintf(stderr, "udev_new failed\n");
+        fprintf(stderr, "idle_detector: udev_new failed\n");
         return NULL;
     }
 
-    struct libinput *li = libinput_udev_create_context(&iface, NULL, udev_ctx);
+    struct libinput *li =
+        libinput_udev_create_context(&iface, NULL, udev_ctx);
     if (!li) {
-        fprintf(stderr, "libinput_udev_create_context failed\n");
+        fprintf(stderr,
+                "idle_detector: libinput_udev_create_context failed\n");
         udev_unref(udev_ctx);
         return NULL;
     }
 
     if (libinput_udev_assign_seat(li, "seat0") != 0) {
-        fprintf(stderr, "libinput_udev_assign_seat failed\n");
+        fprintf(stderr,
+                "idle_detector: libinput_udev_assign_seat failed\n");
         libinput_unref(li);
         udev_unref(udev_ctx);
         return NULL;
     }
 
+    int fd = libinput_get_fd(li);
+    struct pollfd fds = {
+        .fd     = fd,
+        .events = POLLIN
+    };
+
     while (1) {
+        if (poll(&fds, 1, -1) < 0) {
+            if (errno == EINTR)
+                continue;
+
+            perror("idle_detector: poll");
+            break;
+        }
+
         libinput_dispatch(li);
 
         struct libinput_event *ev;
         while ((ev = libinput_get_event(li)) != NULL) {
-            enum libinput_event_type type = libinput_event_get_type(ev);
-            if (type == LIBINPUT_EVENT_KEYBOARD_KEY ||
-                type == LIBINPUT_EVENT_POINTER_MOTION ||
-                type == LIBINPUT_EVENT_POINTER_BUTTON) {
-                update_last_activity();
-                }
-                libinput_event_destroy(ev);
-        }
+            enum libinput_event_type type =
+                libinput_event_get_type(ev);
 
-        usleep(10000); // 10ms
+            switch (type) {
+                case LIBINPUT_EVENT_KEYBOARD_KEY:
+                case LIBINPUT_EVENT_POINTER_MOTION:
+                case LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE:
+                case LIBINPUT_EVENT_POINTER_BUTTON:
+                case LIBINPUT_EVENT_POINTER_AXIS:
+                    update_last_activity();
+                    break;
+                default:
+                    break;
+            }
+
+            libinput_event_destroy(ev);
+        }
     }
 
     libinput_unref(li);
@@ -114,8 +139,9 @@ static long get_idle_time(void) {
     clock_gettime(CLOCK_MONOTONIC, &now);
 
     pthread_mutex_lock(&idle_mutex);
-    long idle_ms = (now.tv_sec - last_activity.tv_sec) * 1000
-    + (now.tv_nsec - last_activity.tv_nsec) / 1000000;
+    long idle_ms =
+        (now.tv_sec  - last_activity.tv_sec)  * 1000 +
+        (now.tv_nsec - last_activity.tv_nsec) / 1000000;
     pthread_mutex_unlock(&idle_mutex);
 
     return idle_ms;
