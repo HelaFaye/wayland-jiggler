@@ -8,16 +8,18 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <time.h>
-#include <pthread.h>
 #include <errno.h>
 #include <string.h>
 #include <poll.h>
+#include <time.h>
+#include <pthread.h>
+#include <stdatomic.h>
+
 #include <libinput.h>
 #include <libudev.h>
 
-static pthread_mutex_t idle_mutex = PTHREAD_MUTEX_INITIALIZER;
-static struct timespec last_activity;
+/* last activity timestamp in monotonic milliseconds */
+static atomic_ulong last_activity_ms = 0;
 
 // ----------------------------
 // Helper: open / close restricted for libinput
@@ -33,12 +35,28 @@ static void close_restricted(int fd, void *userdata) {
 }
 
 // ----------------------------
-// Update idle timer
+// Fast monotonic time in ms
 // ----------------------------
-static void update_last_activity(void) {
-    pthread_mutex_lock(&idle_mutex);
-    clock_gettime(CLOCK_MONOTONIC, &last_activity);
-    pthread_mutex_unlock(&idle_mutex);
+static inline unsigned long now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+    return (unsigned long)ts.tv_sec * 1000ul +
+           (unsigned long)ts.tv_nsec / 1000000ul;
+}
+
+// ----------------------------
+// Update idle timer (debounced)
+// ----------------------------
+static inline void update_last_activity(void) {
+    unsigned long now = now_ms();
+    unsigned long prev = atomic_load_explicit(
+        &last_activity_ms, memory_order_relaxed);
+
+    /* avoid thrashing on motion storms */
+    if (now != prev) {
+        atomic_store_explicit(
+            &last_activity_ms, now, memory_order_relaxed);
+    }
 }
 
 // ----------------------------
@@ -81,7 +99,7 @@ static void* input_monitor_thread(void *arg) {
         .events = POLLIN
     };
 
-    while (1) {
+    for (;;) {
         if (poll(&fds, 1, -1) < 0) {
             if (errno == EINTR)
                 continue;
@@ -94,10 +112,7 @@ static void* input_monitor_thread(void *arg) {
 
         struct libinput_event *ev;
         while ((ev = libinput_get_event(li)) != NULL) {
-            enum libinput_event_type type =
-                libinput_event_get_type(ev);
-
-            switch (type) {
+            switch (libinput_event_get_type(ev)) {
                 case LIBINPUT_EVENT_KEYBOARD_KEY:
                 case LIBINPUT_EVENT_POINTER_MOTION:
                 case LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE:
@@ -108,7 +123,6 @@ static void* input_monitor_thread(void *arg) {
                 default:
                     break;
             }
-
             libinput_event_destroy(ev);
         }
     }
@@ -122,9 +136,8 @@ static void* input_monitor_thread(void *arg) {
 // Public: initialize idle detector
 // ----------------------------
 static void init_idle_detector(void) {
-    pthread_mutex_lock(&idle_mutex);
-    clock_gettime(CLOCK_MONOTONIC, &last_activity);
-    pthread_mutex_unlock(&idle_mutex);
+    atomic_store_explicit(
+        &last_activity_ms, now_ms(), memory_order_relaxed);
 
     pthread_t tid;
     pthread_create(&tid, NULL, input_monitor_thread, NULL);
@@ -135,16 +148,11 @@ static void init_idle_detector(void) {
 // Public: get idle time in milliseconds
 // ----------------------------
 static long get_idle_time(void) {
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
+    unsigned long now  = now_ms();
+    unsigned long last =
+        atomic_load_explicit(&last_activity_ms, memory_order_relaxed);
 
-    pthread_mutex_lock(&idle_mutex);
-    long idle_ms =
-        (now.tv_sec  - last_activity.tv_sec)  * 1000 +
-        (now.tv_nsec - last_activity.tv_nsec) / 1000000;
-    pthread_mutex_unlock(&idle_mutex);
-
-    return idle_ms;
+    return (long)(now - last);
 }
 
 #endif // IDLE_DETECTOR_H
